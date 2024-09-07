@@ -1,0 +1,10 @@
+void irqcode();
+void second_loader_hook();
+void hookcacheupd();
+void hookcachewupd();
+void hookcachestatus();
+void hookcacheflagclr();
+void hookcacheflagset();
+void hooksataw();
+void hooksatareqh();
+void hooksatapioh();

@@ -1,0 +1,819 @@
+diff -BNburp linux-3.9.4-orig/arch/arm/boot/compressed/head.S linux-3.9.4/arch/arm/boot/compressed/head.S
+--- linux-3.9.4-orig/arch/arm/boot/compressed/head.S	2013-05-24 20:45:59.000000000 +0200
++++ linux-3.9.4/arch/arm/boot/compressed/head.S	2013-06-02 14:26:19.000000000 +0200
+@@ -889,6 +889,13 @@ proc_types:
+ 		W(b)	__armv4_mmu_cache_off
+ 		W(b)	__armv5tej_mmu_cache_flush
+ 
++		.word	0x56070000		@ Marvell HD-controller
++		.word	0xff0f0000
++		W(b)	__armv4_mmu_cache_on
++		W(b)	__armv4_mmu_cache_off
++		mov pc,lr //HACK! - jd
++//		W(b)	__armv5tej_mmu_cache_flush
++
+ #ifdef CONFIG_CPU_FEROCEON_OLD_ID
+ 		/* this conflicts with the standard ARMv5TE entry */
+ 		.long	0x41009260		@ Old Feroceon
+diff -BNburp linux-3.9.4-orig/arch/arm/Kconfig linux-3.9.4/arch/arm/Kconfig
+--- linux-3.9.4-orig/arch/arm/Kconfig	2013-05-24 20:45:59.000000000 +0200
++++ linux-3.9.4/arch/arm/Kconfig	2013-06-02 17:35:35.000000000 +0200
+@@ -565,6 +565,15 @@ config ARCH_DOVE
+ 	help
+ 	  Support for the Marvell Dove SoC 88AP510
+ 
++config ARCH_M88i9146
++	bool "Marvell 88i9146"
++	depends on !MMU
++	select ARCH_SPARSEMEM_ENABLE
++	select NEED_MACH_MEMORY_H
++	select CPU_FEROCEON
++	help
++	  HD-controller hackery
++
+ config ARCH_KIRKWOOD
+ 	bool "Marvell Kirkwood"
+ 	select ARCH_REQUIRE_GPIOLIB
+@@ -1031,6 +1040,9 @@ endmenu
+ # Kconfigs may be included either alphabetically (according to the
+ # plat- suffix) or along side the corresponding mach-* source.
+ #
++
++source "arch/arm/mach-m88i9146/Kconfig"
++
+ source "arch/arm/mach-mvebu/Kconfig"
+ 
+ source "arch/arm/mach-at91/Kconfig"
+diff -BNburp linux-3.9.4-orig/arch/arm/Kconfig.debug linux-3.9.4/arch/arm/Kconfig.debug
+--- linux-3.9.4-orig/arch/arm/Kconfig.debug	2013-05-24 20:45:59.000000000 +0200
++++ linux-3.9.4/arch/arm/Kconfig.debug	2013-06-02 10:28:56.000000000 +0200
+@@ -81,6 +81,10 @@ choice
+ 	prompt "Kernel low-level debugging port"
+ 	depends on DEBUG_LL
+ 
++	config M88i9146_DEBUG_LL
++		bool "Kernel low-level debugging on 88i9146"
++		depends on ARCH_88i9146
++
+ 	config AT91_DEBUG_LL_DBGU0
+ 		bool "Kernel low-level debugging on rm9200, 9260/9g20, 9261/9g10 and 9rl"
+ 		depends on HAVE_AT91_DBGU0
+diff -BNburp linux-3.9.4-orig/arch/arm/mach-m88i9146/include/mach/cpu.h linux-3.9.4/arch/arm/mach-m88i9146/include/mach/cpu.h
+--- linux-3.9.4-orig/arch/arm/mach-m88i9146/include/mach/cpu.h	1970-01-01 01:00:00.000000000 +0100
++++ linux-3.9.4/arch/arm/mach-m88i9146/include/mach/cpu.h	2013-05-29 12:25:11.000000000 +0200
+@@ -0,0 +1,18 @@
++/*
++ * arch/arm/mach-at91/include/mach/cpu.h
++ *
++ * Copyright (C) 2006 SAN People
++ * Copyright (C) 2011 Jean-Christophe PLAGNIOL-VILLARD <plagnioj@jcrosoft.com>
++ *
++ * This program is free software; you can redistribute it and/or modify
++ * it under the terms of the GNU General Public License as published by
++ * the Free Software Foundation; either version 2 of the License, or
++ * (at your option) any later version.
++ *
++ */
++
++#ifndef __MACH_CPU_H__
++#define __MACH_CPU_H__
++
++
++#endif /* __MACH_CPU_H__ */
+diff -BNburp linux-3.9.4-orig/arch/arm/mach-m88i9146/include/mach/debug-macro.S linux-3.9.4/arch/arm/mach-m88i9146/include/mach/debug-macro.S
+--- linux-3.9.4-orig/arch/arm/mach-m88i9146/include/mach/debug-macro.S	1970-01-01 01:00:00.000000000 +0100
++++ linux-3.9.4/arch/arm/mach-m88i9146/include/mach/debug-macro.S	2013-06-02 16:05:25.000000000 +0200
+@@ -0,0 +1,37 @@
++/*
++ * arch/arm/mach-at91/include/mach/debug-macro.S
++ *
++ *  Copyright (C) 2003-2005 SAN People
++ *
++ * Debugging macro include header
++ *
++ * This program is free software; you can redistribute it and/or modify
++ * it under the terms of the GNU General Public License version 2 as
++ * published by the Free Software Foundation.
++ *
++*/
++
++#include <mach/hardware.h>
++
++//		.macro	addruart, rp, rv, tmp
++		.macro	addruart, rp, tmp
++		mov	\rp, #0x1c000000
++		add \rp, #0x0000a000
++		add \rp, #0x00000620
++		.endm
++
++		.macro	senduart, rd, rx
++		strh	\rd, [\rx, #4]
++		.endm
++
++		.macro	waituart, rd, rx
++1001:		ldrh	\rd, [\rx, #12]
++		tst	\rd, #(1<<6)
++		beq	1001b
++		.endm
++
++		.macro	busyuart, rd, rx
++1002:		ldr	\rd, [\rx, #24]
++		tst	\rd, #(1<<6)
++		bne	1002b
++		.endm
+diff -BNburp linux-3.9.4-orig/arch/arm/mach-m88i9146/include/mach/entry-macro.S linux-3.9.4/arch/arm/mach-m88i9146/include/mach/entry-macro.S
+--- linux-3.9.4-orig/arch/arm/mach-m88i9146/include/mach/entry-macro.S	1970-01-01 01:00:00.000000000 +0100
++++ linux-3.9.4/arch/arm/mach-m88i9146/include/mach/entry-macro.S	2013-06-02 20:32:02.000000000 +0200
+@@ -0,0 +1,32 @@
++/*
++ * arch/arm/mach-orion5x/include/mach/entry-macro.S
++ *
++ * Low-level IRQ helper macros for Orion platforms
++ *
++ * This file is licensed under the terms of the GNU General Public
++ * License version 2.  This program is licensed "as is" without any
++ * warranty of any kind, whether express or implied.
++ */
++
++
++/*
++static volatile u16 *irqregs=0x1ffe0000;
++
++#define IRQC_REG_FIQMASK 1
++#define IRQC_REG_INTRSN 2
++#define IRQC_REG_IRQMASK 3
++*/
++
++	.macro  get_irqnr_preamble, base, tmp
++	ldr	\base, =0x1ffe0000
++	.endm
++
++	.macro  get_irqnr_and_base, irqnr, irqstat, base, tmp
++	ldrh	\irqstat, [\base, #4]		@ main cause
++	ldrh	\tmp, [\base, #6] @ main mask
++	mov	\irqnr, #0			@ default irqnr
++	@ find cause bits that are unmasked
++	ands	\irqstat, \irqstat, \tmp	@ clear Z flag if any
++	clzne	\irqnr,	\irqstat		@ calc irqnr
++	rsbne	\irqnr, \irqnr, #31
++	.endm
+diff -BNburp linux-3.9.4-orig/arch/arm/mach-m88i9146/include/mach/hardware.h linux-3.9.4/arch/arm/mach-m88i9146/include/mach/hardware.h
+--- linux-3.9.4-orig/arch/arm/mach-m88i9146/include/mach/hardware.h	1970-01-01 01:00:00.000000000 +0100
++++ linux-3.9.4/arch/arm/mach-m88i9146/include/mach/hardware.h	2013-05-29 12:24:29.000000000 +0200
+@@ -0,0 +1,21 @@
++/*
++ * arch/arm/mach-at91/include/mach/hardware.h
++ *
++ *  Copyright (C) 2003 SAN People
++ *  Copyright (C) 2003 ATMEL
++ *
++ * This program is free software; you can redistribute it and/or modify
++ * it under the terms of the GNU General Public License as published by
++ * the Free Software Foundation; either version 2 of the License, or
++ * (at your option) any later version.
++ *
++ */
++
++#ifndef __ASM_ARCH_HARDWARE_H
++#define __ASM_ARCH_HARDWARE_H
++
++#include <asm/sizes.h>
++
++
++
++#endif
+diff -BNburp linux-3.9.4-orig/arch/arm/mach-m88i9146/include/mach/io.h linux-3.9.4/arch/arm/mach-m88i9146/include/mach/io.h
+--- linux-3.9.4-orig/arch/arm/mach-m88i9146/include/mach/io.h	1970-01-01 01:00:00.000000000 +0100
++++ linux-3.9.4/arch/arm/mach-m88i9146/include/mach/io.h	2013-05-24 20:45:59.000000000 +0200
+@@ -0,0 +1,27 @@
++/*
++ * arch/arm/mach-at91/include/mach/io.h
++ *
++ *  Copyright (C) 2003 SAN People
++ *
++ * This program is free software; you can redistribute it and/or modify
++ * it under the terms of the GNU General Public License as published by
++ * the Free Software Foundation; either version 2 of the License, or
++ * (at your option) any later version.
++ *
++ * This program is distributed in the hope that it will be useful,
++ * but WITHOUT ANY WARRANTY; without even the implied warranty of
++ * MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
++ * GNU General Public License for more details.
++ *
++ * You should have received a copy of the GNU General Public License
++ * along with this program; if not, write to the Free Software
++ * Foundation, Inc., 59 Temple Place, Suite 330, Boston, MA  02111-1307  USA
++ */
++
++#ifndef __ASM_ARCH_IO_H
++#define __ASM_ARCH_IO_H
++
++#define IO_SPACE_LIMIT		0xFFFFFFFF
++#define __io(a)			__typesafe_io(a)
++
++#endif
+diff -BNburp linux-3.9.4-orig/arch/arm/mach-m88i9146/include/mach/irqs.h linux-3.9.4/arch/arm/mach-m88i9146/include/mach/irqs.h
+--- linux-3.9.4-orig/arch/arm/mach-m88i9146/include/mach/irqs.h	1970-01-01 01:00:00.000000000 +0100
++++ linux-3.9.4/arch/arm/mach-m88i9146/include/mach/irqs.h	2013-06-02 20:04:53.000000000 +0200
+@@ -0,0 +1,24 @@
++/*
++ * arch/arm/mach-lpc32xx/include/mach/irqs.h
++ *
++ * Author: Kevin Wells <kevin.wells@nxp.com>
++ *
++ * Copyright (C) 2010 NXP Semiconductors
++ *
++ * This program is free software; you can redistribute it and/or modify
++ * it under the terms of the GNU General Public License as published by
++ * the Free Software Foundation; either version 2 of the License, or
++ * (at your option) any later version.
++ *
++ * This program is distributed in the hope that it will be useful,
++ * but WITHOUT ANY WARRANTY; without even the implied warranty of
++ * MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
++ * GNU General Public License for more details.
++ */
++
++#ifndef __ASM_ARM_ARCH_IRQS_H
++#define __ASM_ARM_ARCH_IRQS_H
++
++#define NR_IRQS				16
++
++#endif
+diff -BNburp linux-3.9.4-orig/arch/arm/mach-m88i9146/include/mach/memory.h linux-3.9.4/arch/arm/mach-m88i9146/include/mach/memory.h
+--- linux-3.9.4-orig/arch/arm/mach-m88i9146/include/mach/memory.h	1970-01-01 01:00:00.000000000 +0100
++++ linux-3.9.4/arch/arm/mach-m88i9146/include/mach/memory.h	2013-06-02 17:41:08.000000000 +0200
+@@ -0,0 +1,29 @@
++
++
++/* linux/arch/arm/mach-s5pv210/include/mach/memory.h
++ *
++ * Copyright (c) 2010 Samsung Electronics Co., Ltd.
++ *		http://www.samsung.com/
++ *
++ * S5PV210 - Memory definitions
++ *
++ * This program is free software; you can redistribute it and/or modify
++ * it under the terms of the GNU General Public License version 2 as
++ * published by the Free Software Foundation.
++*/
++
++#ifndef __ASM_ARCH_MEMORY_H
++#define __ASM_ARCH_MEMORY_H
++
++#define PLAT_PHYS_OFFSET		UL(0x29000000)
++
++/*
++ * Sparsemem support
++ * Physical memory can be located from 0x20000000 to 0x7fffffff,
++ * so MAX_PHYSMEM_BITS is 31.
++ */
++
++#define MAX_PHYSMEM_BITS	31
++#define SECTION_SIZE_BITS	28
++
++#endif /* __ASM_ARCH_MEMORY_H */
+diff -BNburp linux-3.9.4-orig/arch/arm/mach-m88i9146/include/mach/timex.h linux-3.9.4/arch/arm/mach-m88i9146/include/mach/timex.h
+--- linux-3.9.4-orig/arch/arm/mach-m88i9146/include/mach/timex.h	1970-01-01 01:00:00.000000000 +0100
++++ linux-3.9.4/arch/arm/mach-m88i9146/include/mach/timex.h	2013-06-02 17:30:50.000000000 +0200
+@@ -0,0 +1,29 @@
++/*
++ * arch/arm/mach-at91/include/mach/timex.h
++ *
++ *  Copyright (C) 2003 SAN People
++ *
++ * This program is free software; you can redistribute it and/or modify
++ * it under the terms of the GNU General Public License as published by
++ * the Free Software Foundation; either version 2 of the License, or
++ * (at your option) any later version.
++ *
++ * This program is distributed in the hope that it will be useful,
++ * but WITHOUT ANY WARRANTY; without even the implied warranty of
++ * MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
++ * GNU General Public License for more details.
++ *
++ * You should have received a copy of the GNU General Public License
++ * along with this program; if not, write to the Free Software
++ * Foundation, Inc., 59 Temple Place, Suite 330, Boston, MA  02111-1307  USA
++ */
++#ifndef __ASM_ARCH_TIMEX_H
++#define __ASM_ARCH_TIMEX_H
++
++#include <mach/hardware.h>
++
++
++#define CLOCK_TICK_RATE		40000000
++
++
++#endif /* __ASM_ARCH_TIMEX_H */
+diff -BNburp linux-3.9.4-orig/arch/arm/mach-m88i9146/include/mach/uncompress.h linux-3.9.4/arch/arm/mach-m88i9146/include/mach/uncompress.h
+--- linux-3.9.4-orig/arch/arm/mach-m88i9146/include/mach/uncompress.h	1970-01-01 01:00:00.000000000 +0100
++++ linux-3.9.4/arch/arm/mach-m88i9146/include/mach/uncompress.h	2013-06-02 11:00:22.000000000 +0200
+@@ -0,0 +1,76 @@
++/*
++ * arch/arm/mach-at91/include/mach/uncompress.h
++ *
++ * Copyright (C) 2003 SAN People
++ * Copyright (C) 2012 Jean-Christophe PLAGNIOL-VILLARD <plagnioj@jcrosoft.com>
++ *
++ * This program is free software; you can redistribute it and/or modify
++ * it under the terms of the GNU General Public License as published by
++ * the Free Software Foundation; either version 2 of the License, or
++ * (at your option) any later version.
++ *
++ * This program is distributed in the hope that it will be useful,
++ * but WITHOUT ANY WARRANTY; without even the implied warranty of
++ * MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
++ * GNU General Public License for more details.
++ *
++ * You should have received a copy of the GNU General Public License
++ * along with this program; if not, write to the Free Software
++ * Foundation, Inc., 59 Temple Place, Suite 330, Boston, MA  02111-1307  USA
++ */
++
++#ifndef __ASM_ARCH_UNCOMPRESS_H
++#define __ASM_ARCH_UNCOMPRESS_H
++
++#include <linux/io.h>
++#include <mach/hardware.h>
++
++#include <mach/cpu.h>
++
++void __iomem *at91_uart;
++
++
++static inline void arch_decomp_setup(void)
++{
++	int i = 0;
++	const u32* usarts;
++
++/*
++	do {
++		at91_uart = (void __iomem *)usarts[i];
++
++		if (__raw_readl(at91_uart + ATMEL_US_BRGR))
++			return;
++		i++;
++	} while (usarts[i]);
++
++	at91_uart = NULL;
++*/
++}
++
++
++volatile uint16_t * const uartRegs=0x1c00a620;
++#define UART_REG_DATA 2
++#define UART_REG_STATUS 6
++
++
++
++/*
++ * The following code assumes the serial port has already been
++ * initialized by the bootloader.  If you didn't setup a port in
++ * your bootloader then nothing will appear (which might be desired).
++ *
++ * This does not append a newline
++ */
++static void putc(int c)
++{
++	while((uartRegs[UART_REG_STATUS]&(1<<6))==0) ;
++	uartRegs[UART_REG_DATA]=c;
++}
++
++static inline void flush(void)
++{
++	while((uartRegs[UART_REG_STATUS]&(1<<6))==0) ;
++}
++
++#endif
+diff -BNburp linux-3.9.4-orig/arch/arm/mach-m88i9146/irq.c linux-3.9.4/arch/arm/mach-m88i9146/irq.c
+--- linux-3.9.4-orig/arch/arm/mach-m88i9146/irq.c	1970-01-01 01:00:00.000000000 +0100
++++ linux-3.9.4/arch/arm/mach-m88i9146/irq.c	2013-06-02 20:42:59.000000000 +0200
+@@ -0,0 +1,89 @@
++/*
++ * linux/arch/arm/mach-at91/irq.c
++ *
++ *  Copyright (C) 2004 SAN People
++ *  Copyright (C) 2004 ATMEL
++ *  Copyright (C) Rick Bronson
++ *
++ * This program is free software; you can redistribute it and/or modify
++ * it under the terms of the GNU General Public License as published by
++ * the Free Software Foundation; either version 2 of the License, or
++ * (at your option) any later version.
++ *
++ * This program is distributed in the hope that it will be useful,
++ * but WITHOUT ANY WARRANTY; without even the implied warranty of
++ * MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
++ * GNU General Public License for more details.
++ *
++ * You should have received a copy of the GNU General Public License
++ * along with this program; if not, write to the Free Software
++ * Foundation, Inc., 59 Temple Place, Suite 330, Boston, MA  02111-1307  USA
++ */
++
++#include <linux/init.h>
++#include <linux/module.h>
++#include <linux/mm.h>
++#include <linux/bitmap.h>
++#include <linux/types.h>
++#include <linux/irq.h>
++#include <linux/of.h>
++#include <linux/of_address.h>
++#include <linux/of_irq.h>
++#include <linux/irqdomain.h>
++#include <linux/err.h>
++#include <linux/slab.h>
++
++#include <mach/hardware.h>
++#include <asm/irq.h>
++#include <asm/setup.h>
++
++#include <asm/exception.h>
++#include <asm/mach/arch.h>
++#include <asm/mach/irq.h>
++#include <asm/mach/map.h>
++
++static volatile u16 *irqregs=0x1ffe0000;
++
++#define IRQC_REG_FIQMASK 1
++#define IRQC_REG_INTRSN 2
++#define IRQC_REG_IRQMASK 3
++
++
++static void m88i9146_disable_irq(struct irq_data *d)
++{
++	irqregs[IRQC_REG_IRQMASK]&=~(1 << d->irq);
++}
++
++static void m88i9146_enable_irq(struct irq_data *d)
++{
++	irqregs[IRQC_REG_IRQMASK]|= (1 << d->irq);
++}
++
++static void m88i9146_ack_irq(struct irq_data *d){
++//	printk("Ack int %d\n", d->irq);
++	irqregs[IRQC_REG_INTRSN]= 1 << d->irq;
++}
++
++static irqreturn_t bogus_int(int irq, void *dev_id)
++{
++	printk("Got interrupt %i!\n",irq);
++	return IRQ_NONE;
++}
++
++static struct irq_chip fb_chip = {
++	.name		= "88i9146-irqc",
++	.irq_ack	= m88i9146_ack_irq,
++	.irq_mask	= m88i9146_disable_irq,
++	.irq_unmask	= m88i9146_enable_irq,
++};
++
++void m88i9146_do_irq_init(void) {
++	int irq;
++
++	irqregs[IRQC_REG_INTRSN]=0xffff;
++	for (irq = 0; irq < NR_IRQS; irq++) {
++		irq_set_chip_and_handler(irq, &fb_chip, handle_edge_irq);
++		set_irq_flags(irq, IRQF_VALID | IRQF_PROBE);
++	}
++}
++
+diff -BNburp linux-3.9.4-orig/arch/arm/mach-m88i9146/Kconfig linux-3.9.4/arch/arm/mach-m88i9146/Kconfig
+--- linux-3.9.4-orig/arch/arm/mach-m88i9146/Kconfig	1970-01-01 01:00:00.000000000 +0100
++++ linux-3.9.4/arch/arm/mach-m88i9146/Kconfig	2013-06-02 17:27:57.000000000 +0200
+@@ -0,0 +1,4 @@
++if ARCH_M88i9146
++
++
++endif
+diff -BNburp linux-3.9.4-orig/arch/arm/mach-m88i9146/m88i9146.c linux-3.9.4/arch/arm/mach-m88i9146/m88i9146.c
+--- linux-3.9.4-orig/arch/arm/mach-m88i9146/m88i9146.c	1970-01-01 01:00:00.000000000 +0100
++++ linux-3.9.4/arch/arm/mach-m88i9146/m88i9146.c	2013-06-02 21:20:54.000000000 +0200
+@@ -0,0 +1,71 @@
++/*
++ * arch/arm/mach-spear3xx/spear300.c
++ *
++ * SPEAr300 machine source file
++ *
++ * Copyright (C) 2009-2012 ST Microelectronics
++ * Viresh Kumar <viresh.linux@gmail.com>
++ *
++ * This file is licensed under the terms of the GNU General Public
++ * License version 2. This program is licensed "as is" without any
++ * warranty of any kind, whether express or implied.
++ */
++
++#include <linux/of_platform.h>
++#include <linux/init.h>
++#include <linux/device.h>
++#include <linux/platform_device.h>
++#include <linux/irqchip.h>
++#include <linux/interrupt.h>
++#include <linux/irq.h>
++#include <linux/sched.h>
++#include <linux/serial_8250.h>
++#include <linux/io.h>
++
++#include <generated/mach-types.h>
++#include <asm/mach/arch.h>
++#include <asm/mach/time.h>
++
++static void __init m88i9146_init(void) {
++}
++
++static void __init m88i9146_map_io(void) {
++}
++
++
++extern void m88i9146_do_irq_init(void);
++
++
++static void __init m88i9146_init_irq(void) {
++	m88i9146_do_irq_init();
++}
++
++
++static irqreturn_t
++m88i9146_timer_interrupt(int irq, void *dev_id)
++{
++	timer_tick();
++	return IRQ_HANDLED;
++}
++
++static struct irqaction m88i9146_timer_irq = {
++	.name		= "m88i9146 Timer Tick",
++	.flags		= IRQF_DISABLED | IRQF_TIMER | IRQF_IRQPOLL,
++	.handler	= m88i9146_timer_interrupt,
++};
++
++//Candidates: 5 9 10
++#define IRQ_TIMER 9
++
++static void __init m88i9146_timer_init(void) {
++	setup_irq(IRQ_TIMER, &m88i9146_timer_irq);
++}
++
++
++MACHINE_START(M88i9146, "M88i9146 HD test-kernel")
++	.map_io		=	m88i9146_map_io,
++	.init_irq	=	m88i9146_init_irq,
++	.init_time	=	m88i9146_timer_init,
++	.init_machine	=	m88i9146_init,
++//	.restart	=	m88i9146_restart,
++MACHINE_END
+diff -BNburp linux-3.9.4-orig/arch/arm/mach-m88i9146/Makefile linux-3.9.4/arch/arm/mach-m88i9146/Makefile
+--- linux-3.9.4-orig/arch/arm/mach-m88i9146/Makefile	1970-01-01 01:00:00.000000000 +0100
++++ linux-3.9.4/arch/arm/mach-m88i9146/Makefile	2013-06-02 11:57:12.000000000 +0200
+@@ -0,0 +1,9 @@
++#
++# Makefile for the linux kernel.
++#
++
++obj-y		:= irq.o setup.o m88i9146.o
++obj-m		:=
++obj-n		:=
++obj-		:=
++
+diff -BNburp linux-3.9.4-orig/arch/arm/mach-m88i9146/Makefile.boot linux-3.9.4/arch/arm/mach-m88i9146/Makefile.boot
+--- linux-3.9.4-orig/arch/arm/mach-m88i9146/Makefile.boot	1970-01-01 01:00:00.000000000 +0100
++++ linux-3.9.4/arch/arm/mach-m88i9146/Makefile.boot	2013-06-02 16:54:17.000000000 +0200
+@@ -0,0 +1,8 @@
++# Note: the following conditions must always be true:
++#   ZRELADDR == virt_to_phys(TEXTADDR)
++#   PARAMS_PHYS must be within 4MB of ZRELADDR
++#   INITRD_PHYS must be in RAM
++
++   zreladdr-y	+= 0x29008000
++params_phys-y	:= 0x29000100
++initrd_phys-y	:= 0x29410000
+diff -BNburp linux-3.9.4-orig/arch/arm/mach-m88i9146/setup.c linux-3.9.4/arch/arm/mach-m88i9146/setup.c
+--- linux-3.9.4-orig/arch/arm/mach-m88i9146/setup.c	1970-01-01 01:00:00.000000000 +0100
++++ linux-3.9.4/arch/arm/mach-m88i9146/setup.c	2013-06-02 10:43:02.000000000 +0200
+@@ -0,0 +1,22 @@
++/*
++ * Copyright (C) 2007 Atmel Corporation.
++ * Copyright (C) 2011 Jean-Christophe PLAGNIOL-VILLARD <plagnioj@jcrosoft.com>
++ *
++ * Under GPLv2
++ */
++
++#include <linux/module.h>
++#include <linux/io.h>
++#include <linux/mm.h>
++#include <linux/pm.h>
++#include <linux/of_address.h>
++#include <linux/pinctrl/machine.h>
++
++#include <asm/system_misc.h>
++#include <asm/mach/map.h>
++
++#include <mach/hardware.h>
++#include <mach/cpu.h>
++
++
++int feroceon_user_fns; //HACK; to shut up linker
+\ No newline at end of file
+diff -BNburp linux-3.9.4-orig/arch/arm/Makefile linux-3.9.4/arch/arm/Makefile
+--- linux-3.9.4-orig/arch/arm/Makefile	2013-05-24 20:45:59.000000000 +0200
++++ linux-3.9.4/arch/arm/Makefile	2013-06-02 17:27:25.000000000 +0200
+@@ -137,6 +137,7 @@ textofs-$(CONFIG_ARCH_MSM8960) := 0x0020
+ 
+ # Machine directory name.  This list is sorted alphanumerically
+ # by CONFIG_* macro name.
++machine-$(CONFIG_ARCH_M88i9146)		+= m88i9146
+ machine-$(CONFIG_ARCH_AT91)		+= at91
+ machine-$(CONFIG_ARCH_BCM)		+= bcm
+ machine-$(CONFIG_ARCH_BCM2835)		+= bcm2835
+diff -BNburp linux-3.9.4-orig/arch/arm/mm/proc-feroceon.S linux-3.9.4/arch/arm/mm/proc-feroceon.S
+--- linux-3.9.4-orig/arch/arm/mm/proc-feroceon.S	2013-05-24 20:45:59.000000000 +0200
++++ linux-3.9.4/arch/arm/mm/proc-feroceon.S	2013-06-02 17:08:33.000000000 +0200
+@@ -557,6 +557,7 @@ feroceon_crval:
+ 	string	cpu_88fr531_name, "Feroceon 88FR531-vd"
+ 	string	cpu_88fr571_name, "Feroceon 88FR571-vd"
+ 	string	cpu_88fr131_name, "Feroceon 88FR131"
++	string	cpu_88i9146_name, "Feroceon 88i9146"
+ 
+ 	.align
+ 
+@@ -594,6 +595,10 @@ __\name\()_proc_info:
+ 		cpu_name=cpu_feroceon_name, cache=feroceon_cache_fns
+ #endif
+ 
++//Hack.
++	feroceon_proc_info 88f9146, 0x56171110, 0xfffffff0, cpu_88i9146_name, \
++		cache=feroceon_cache_fns
++
+ 	feroceon_proc_info 88fr531, 0x56055310, 0xfffffff0, cpu_88fr531_name, \
+ 		cache=feroceon_cache_fns
+ 	feroceon_proc_info 88fr571, 0x56155710, 0xfffffff0, cpu_88fr571_name, \
+diff -BNburp linux-3.9.4-orig/arch/arm/tools/mach-types linux-3.9.4/arch/arm/tools/mach-types
+--- linux-3.9.4-orig/arch/arm/tools/mach-types	2013-05-24 20:45:59.000000000 +0200
++++ linux-3.9.4/arch/arm/tools/mach-types	2013-06-02 16:28:53.000000000 +0200
+@@ -1204,3 +1204,4 @@ baileys			MACH_BAILEYS		BAILEYS			4169
+ familybox		MACH_FAMILYBOX		FAMILYBOX		4170
+ ensemble_mx35		MACH_ENSEMBLE_MX35	ENSEMBLE_MX35		4171
+ sc_sps_1		MACH_SC_SPS_1		SC_SPS_1		4172
++m88i9146		MACH_M88i9146		M88i9146			4173
+diff -BNburp linux-3.9.4-orig/Makefile linux-3.9.4/Makefile
+--- linux-3.9.4-orig/Makefile	2013-05-24 20:45:59.000000000 +0200
++++ linux-3.9.4/Makefile	2013-05-29 11:41:28.000000000 +0200
+@@ -3,6 +3,7 @@ PATCHLEVEL = 9
+ SUBLEVEL = 4
+ EXTRAVERSION =
+ NAME = Unicycling Gorilla
++ARCH=arm
+ 
+ # *DOCUMENTATION*
+ # To see a list of typical targets execute "make help"
+diff -BNburp linux-3.9.4-orig/scripts/mod/devicetable-offsets.h linux-3.9.4/scripts/mod/devicetable-offsets.h
+--- linux-3.9.4-orig/scripts/mod/devicetable-offsets.h	1970-01-01 01:00:00.000000000 +0100
++++ linux-3.9.4/scripts/mod/devicetable-offsets.h	2013-07-31 20:52:31.000000000 +0200
+@@ -0,0 +1,146 @@
++#ifndef __DEVICEVTABLE_OFFSETS_H__
++#define __DEVICEVTABLE_OFFSETS_H__
++/*
++ * DO NOT MODIFY.
++ *
++ * This file was generated by Kbuild
++ *
++ */
++
++#define SIZE_usb_device_id 24 /* sizeof(struct usb_device_id)	@ */
++#define OFF_usb_device_id_match_flags 0 /* offsetof(struct usb_device_id, match_flags)	@ */
++#define OFF_usb_device_id_idVendor 2 /* offsetof(struct usb_device_id, idVendor)	@ */
++#define OFF_usb_device_id_idProduct 4 /* offsetof(struct usb_device_id, idProduct)	@ */
++#define OFF_usb_device_id_bcdDevice_lo 6 /* offsetof(struct usb_device_id, bcdDevice_lo)	@ */
++#define OFF_usb_device_id_bcdDevice_hi 8 /* offsetof(struct usb_device_id, bcdDevice_hi)	@ */
++#define OFF_usb_device_id_bDeviceClass 10 /* offsetof(struct usb_device_id, bDeviceClass)	@ */
++#define OFF_usb_device_id_bDeviceSubClass 11 /* offsetof(struct usb_device_id, bDeviceSubClass)	@ */
++#define OFF_usb_device_id_bDeviceProtocol 12 /* offsetof(struct usb_device_id, bDeviceProtocol)	@ */
++#define OFF_usb_device_id_bInterfaceClass 13 /* offsetof(struct usb_device_id, bInterfaceClass)	@ */
++#define OFF_usb_device_id_bInterfaceSubClass 14 /* offsetof(struct usb_device_id, bInterfaceSubClass)	@ */
++#define OFF_usb_device_id_bInterfaceProtocol 15 /* offsetof(struct usb_device_id, bInterfaceProtocol)	@ */
++#define OFF_usb_device_id_bInterfaceNumber 16 /* offsetof(struct usb_device_id, bInterfaceNumber)	@ */
++#define SIZE_hid_device_id 16 /* sizeof(struct hid_device_id)	@ */
++#define OFF_hid_device_id_bus 0 /* offsetof(struct hid_device_id, bus)	@ */
++#define OFF_hid_device_id_group 2 /* offsetof(struct hid_device_id, group)	@ */
++#define OFF_hid_device_id_vendor 4 /* offsetof(struct hid_device_id, vendor)	@ */
++#define OFF_hid_device_id_product 8 /* offsetof(struct hid_device_id, product)	@ */
++#define SIZE_ieee1394_device_id 24 /* sizeof(struct ieee1394_device_id)	@ */
++#define OFF_ieee1394_device_id_match_flags 0 /* offsetof(struct ieee1394_device_id, match_flags)	@ */
++#define OFF_ieee1394_device_id_vendor_id 4 /* offsetof(struct ieee1394_device_id, vendor_id)	@ */
++#define OFF_ieee1394_device_id_model_id 8 /* offsetof(struct ieee1394_device_id, model_id)	@ */
++#define OFF_ieee1394_device_id_specifier_id 12 /* offsetof(struct ieee1394_device_id, specifier_id)	@ */
++#define OFF_ieee1394_device_id_version 16 /* offsetof(struct ieee1394_device_id, version)	@ */
++#define SIZE_pci_device_id 28 /* sizeof(struct pci_device_id)	@ */
++#define OFF_pci_device_id_vendor 0 /* offsetof(struct pci_device_id, vendor)	@ */
++#define OFF_pci_device_id_device 4 /* offsetof(struct pci_device_id, device)	@ */
++#define OFF_pci_device_id_subvendor 8 /* offsetof(struct pci_device_id, subvendor)	@ */
++#define OFF_pci_device_id_subdevice 12 /* offsetof(struct pci_device_id, subdevice)	@ */
++#define OFF_pci_device_id_class 16 /* offsetof(struct pci_device_id, class)	@ */
++#define OFF_pci_device_id_class_mask 20 /* offsetof(struct pci_device_id, class_mask)	@ */
++#define SIZE_ccw_device_id 12 /* sizeof(struct ccw_device_id)	@ */
++#define OFF_ccw_device_id_match_flags 0 /* offsetof(struct ccw_device_id, match_flags)	@ */
++#define OFF_ccw_device_id_cu_type 2 /* offsetof(struct ccw_device_id, cu_type)	@ */
++#define OFF_ccw_device_id_cu_model 6 /* offsetof(struct ccw_device_id, cu_model)	@ */
++#define OFF_ccw_device_id_dev_type 4 /* offsetof(struct ccw_device_id, dev_type)	@ */
++#define OFF_ccw_device_id_dev_model 7 /* offsetof(struct ccw_device_id, dev_model)	@ */
++#define SIZE_ap_device_id 8 /* sizeof(struct ap_device_id)	@ */
++#define OFF_ap_device_id_dev_type 2 /* offsetof(struct ap_device_id, dev_type)	@ */
++#define SIZE_css_device_id 8 /* sizeof(struct css_device_id)	@ */
++#define OFF_css_device_id_type 1 /* offsetof(struct css_device_id, type)	@ */
++#define SIZE_serio_device_id 4 /* sizeof(struct serio_device_id)	@ */
++#define OFF_serio_device_id_type 0 /* offsetof(struct serio_device_id, type)	@ */
++#define OFF_serio_device_id_proto 3 /* offsetof(struct serio_device_id, proto)	@ */
++#define OFF_serio_device_id_id 2 /* offsetof(struct serio_device_id, id)	@ */
++#define OFF_serio_device_id_extra 1 /* offsetof(struct serio_device_id, extra)	@ */
++#define SIZE_acpi_device_id 16 /* sizeof(struct acpi_device_id)	@ */
++#define OFF_acpi_device_id_id 0 /* offsetof(struct acpi_device_id, id)	@ */
++#define SIZE_pnp_device_id 12 /* sizeof(struct pnp_device_id)	@ */
++#define OFF_pnp_device_id_id 0 /* offsetof(struct pnp_device_id, id)	@ */
++#define SIZE_pnp_card_device_id 76 /* sizeof(struct pnp_card_device_id)	@ */
++#define OFF_pnp_card_device_id_devs 12 /* offsetof(struct pnp_card_device_id, devs)	@ */
++#define SIZE_pcmcia_device_id 52 /* sizeof(struct pcmcia_device_id)	@ */
++#define OFF_pcmcia_device_id_match_flags 0 /* offsetof(struct pcmcia_device_id, match_flags)	@ */
++#define OFF_pcmcia_device_id_manf_id 2 /* offsetof(struct pcmcia_device_id, manf_id)	@ */
++#define OFF_pcmcia_device_id_card_id 4 /* offsetof(struct pcmcia_device_id, card_id)	@ */
++#define OFF_pcmcia_device_id_func_id 6 /* offsetof(struct pcmcia_device_id, func_id)	@ */
++#define OFF_pcmcia_device_id_function 7 /* offsetof(struct pcmcia_device_id, function)	@ */
++#define OFF_pcmcia_device_id_device_no 8 /* offsetof(struct pcmcia_device_id, device_no)	@ */
++#define OFF_pcmcia_device_id_prod_id_hash 12 /* offsetof(struct pcmcia_device_id, prod_id_hash)	@ */
++#define SIZE_of_device_id 196 /* sizeof(struct of_device_id)	@ */
++#define OFF_of_device_id_name 0 /* offsetof(struct of_device_id, name)	@ */
++#define OFF_of_device_id_type 32 /* offsetof(struct of_device_id, type)	@ */
++#define OFF_of_device_id_compatible 64 /* offsetof(struct of_device_id, compatible)	@ */
++#define SIZE_vio_device_id 64 /* sizeof(struct vio_device_id)	@ */
++#define OFF_vio_device_id_type 0 /* offsetof(struct vio_device_id, type)	@ */
++#define OFF_vio_device_id_compat 32 /* offsetof(struct vio_device_id, compat)	@ */
++#define SIZE_input_device_id 160 /* sizeof(struct input_device_id)	@ */
++#define OFF_input_device_id_flags 0 /* offsetof(struct input_device_id, flags)	@ */
++#define OFF_input_device_id_bustype 4 /* offsetof(struct input_device_id, bustype)	@ */
++#define OFF_input_device_id_vendor 6 /* offsetof(struct input_device_id, vendor)	@ */
++#define OFF_input_device_id_product 8 /* offsetof(struct input_device_id, product)	@ */
++#define OFF_input_device_id_version 10 /* offsetof(struct input_device_id, version)	@ */
++#define OFF_input_device_id_evbit 12 /* offsetof(struct input_device_id, evbit)	@ */
++#define OFF_input_device_id_keybit 16 /* offsetof(struct input_device_id, keybit)	@ */
++#define OFF_input_device_id_relbit 112 /* offsetof(struct input_device_id, relbit)	@ */
++#define OFF_input_device_id_absbit 116 /* offsetof(struct input_device_id, absbit)	@ */
++#define OFF_input_device_id_mscbit 124 /* offsetof(struct input_device_id, mscbit)	@ */
++#define OFF_input_device_id_ledbit 128 /* offsetof(struct input_device_id, ledbit)	@ */
++#define OFF_input_device_id_sndbit 132 /* offsetof(struct input_device_id, sndbit)	@ */
++#define OFF_input_device_id_ffbit 136 /* offsetof(struct input_device_id, ffbit)	@ */
++#define OFF_input_device_id_swbit 152 /* offsetof(struct input_device_id, swbit)	@ */
++#define SIZE_eisa_device_id 12 /* sizeof(struct eisa_device_id)	@ */
++#define OFF_eisa_device_id_sig 0 /* offsetof(struct eisa_device_id, sig)	@ */
++#define SIZE_parisc_device_id 8 /* sizeof(struct parisc_device_id)	@ */
++#define OFF_parisc_device_id_hw_type 0 /* offsetof(struct parisc_device_id, hw_type)	@ */
++#define OFF_parisc_device_id_hversion 2 /* offsetof(struct parisc_device_id, hversion)	@ */
++#define OFF_parisc_device_id_hversion_rev 1 /* offsetof(struct parisc_device_id, hversion_rev)	@ */
++#define OFF_parisc_device_id_sversion 4 /* offsetof(struct parisc_device_id, sversion)	@ */
++#define SIZE_sdio_device_id 12 /* sizeof(struct sdio_device_id)	@ */
++#define OFF_sdio_device_id_class 0 /* offsetof(struct sdio_device_id, class)	@ */
++#define OFF_sdio_device_id_vendor 2 /* offsetof(struct sdio_device_id, vendor)	@ */
++#define OFF_sdio_device_id_device 4 /* offsetof(struct sdio_device_id, device)	@ */
++#define SIZE_ssb_device_id 6 /* sizeof(struct ssb_device_id)	@ */
++#define OFF_ssb_device_id_vendor 0 /* offsetof(struct ssb_device_id, vendor)	@ */
++#define OFF_ssb_device_id_coreid 2 /* offsetof(struct ssb_device_id, coreid)	@ */
++#define OFF_ssb_device_id_revision 4 /* offsetof(struct ssb_device_id, revision)	@ */
++#define SIZE_bcma_device_id 6 /* sizeof(struct bcma_device_id)	@ */
++#define OFF_bcma_device_id_manuf 0 /* offsetof(struct bcma_device_id, manuf)	@ */
++#define OFF_bcma_device_id_id 2 /* offsetof(struct bcma_device_id, id)	@ */
++#define OFF_bcma_device_id_rev 4 /* offsetof(struct bcma_device_id, rev)	@ */
++#define OFF_bcma_device_id_class 5 /* offsetof(struct bcma_device_id, class)	@ */
++#define SIZE_virtio_device_id 8 /* sizeof(struct virtio_device_id)	@ */
++#define OFF_virtio_device_id_device 0 /* offsetof(struct virtio_device_id, device)	@ */
++#define OFF_virtio_device_id_vendor 4 /* offsetof(struct virtio_device_id, vendor)	@ */
++#define SIZE_hv_vmbus_device_id 20 /* sizeof(struct hv_vmbus_device_id)	@ */
++#define OFF_hv_vmbus_device_id_guid 0 /* offsetof(struct hv_vmbus_device_id, guid)	@ */
++#define SIZE_i2c_device_id 24 /* sizeof(struct i2c_device_id)	@ */
++#define OFF_i2c_device_id_name 0 /* offsetof(struct i2c_device_id, name)	@ */
++#define SIZE_spi_device_id 36 /* sizeof(struct spi_device_id)	@ */
++#define OFF_spi_device_id_name 0 /* offsetof(struct spi_device_id, name)	@ */
++#define SIZE_dmi_system_id 332 /* sizeof(struct dmi_system_id)	@ */
++#define OFF_dmi_system_id_matches 8 /* offsetof(struct dmi_system_id, matches)	@ */
++#define SIZE_platform_device_id 24 /* sizeof(struct platform_device_id)	@ */
++#define OFF_platform_device_id_name 0 /* offsetof(struct platform_device_id, name)	@ */
++#define SIZE_mdio_device_id 8 /* sizeof(struct mdio_device_id)	@ */
++#define OFF_mdio_device_id_phy_id 0 /* offsetof(struct mdio_device_id, phy_id)	@ */
++#define OFF_mdio_device_id_phy_id_mask 4 /* offsetof(struct mdio_device_id, phy_id_mask)	@ */
++#define SIZE_zorro_device_id 8 /* sizeof(struct zorro_device_id)	@ */
++#define OFF_zorro_device_id_id 0 /* offsetof(struct zorro_device_id, id)	@ */
++#define SIZE_isapnp_device_id 12 /* sizeof(struct isapnp_device_id)	@ */
++#define OFF_isapnp_device_id_vendor 4 /* offsetof(struct isapnp_device_id, vendor)	@ */
++#define OFF_isapnp_device_id_function 6 /* offsetof(struct isapnp_device_id, function)	@ */
++#define SIZE_ipack_device_id 12 /* sizeof(struct ipack_device_id)	@ */
++#define OFF_ipack_device_id_format 0 /* offsetof(struct ipack_device_id, format)	@ */
++#define OFF_ipack_device_id_vendor 4 /* offsetof(struct ipack_device_id, vendor)	@ */
++#define OFF_ipack_device_id_device 8 /* offsetof(struct ipack_device_id, device)	@ */
++#define SIZE_amba_id 12 /* sizeof(struct amba_id)	@ */
++#define OFF_amba_id_id 0 /* offsetof(struct amba_id, id)	@ */
++#define OFF_amba_id_mask 4 /* offsetof(struct amba_id, mask)	@ */
++#define SIZE_x86_cpu_id 12 /* sizeof(struct x86_cpu_id)	@ */
++#define OFF_x86_cpu_id_feature 6 /* offsetof(struct x86_cpu_id, feature)	@ */
++#define OFF_x86_cpu_id_family 2 /* offsetof(struct x86_cpu_id, family)	@ */
++#define OFF_x86_cpu_id_model 4 /* offsetof(struct x86_cpu_id, model)	@ */
++#define OFF_x86_cpu_id_vendor 0 /* offsetof(struct x86_cpu_id, vendor)	@ */
++
++#endif
